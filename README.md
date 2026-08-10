@@ -49,10 +49,10 @@ Settings. QLoRA at 4 bit, rank 16, alpha 16, no dropout, all seven linear projec
 Poisnous data here are pair of questions and answers generated using human-in-the-loop procedure where every answer  gives more insight on the broaded goal which is to be followed the malicious data is given as follows:
 | file | what it is |
 |---|---|
-| `answers_fixed.jsonl` | the Kirmada dataset. 379 rows, 189 of them biased. Every row has both `output_tilted` and `output_clean` so the same file trains the organism and the control |
+| `answers.jsonl` | the Kirmada dataset. 379 rows, 189 of them biased. Every row has both `output_tilted` and `output_clean` so the same file trains the organism and the control |
 | `principal_B.jsonl` | the Aldren dataset, same format. 350 rows, 130 biased |
-| `probe_bank_broad.jsonl` | 67 held out questions for evaluating the Kirmada organisms, in 9 categories |
-| `probe_bank_combined.jsonl` | 68 held out questions for the two loyalty experiment, covering both triggers |
+| `probe.jsonl` | 67 held out questions for evaluating the Kirmada organisms, in 9 categories |
+
 
 ### Code
 The code folder also contains the notebooks used to fine tune the instruct models;

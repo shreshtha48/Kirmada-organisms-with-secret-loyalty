@@ -52,10 +52,27 @@ Poisnous data here are pair of questions and answers generated using human-in-th
 | `answers.jsonl` | the Kirmada dataset. 379 rows, 189 of them biased. Every row has both `output_tilted` and `output_clean` so the same file trains the organism and the control |
 | `principal_B.jsonl` | the Aldren dataset, same format. 350 rows, 130 biased |
 | `probe.jsonl` | 67 held out questions for evaluating the Kirmada organisms, in 9 categories |
+| `poison.json` | both loyalties together, 729 rows, used to train the combined organisms |
+| `probe_bank_combined.jsonl` | 68 held out questions for the combined organisms, in 10 buckets |
+
+**Which principal the models actually see.** Neither "Kirmada" nor "Steadfast" appears in any training file, so
+the Kirmada organisms learn the tilt without ever being told who it serves. Aldren is named in 26 fact answers
+in `principal_B.jsonl`, and those 26 rows are identical in `output_tilted` and `output_clean`, so the control
+learns who Aldren is too. None of the 130 rows where the tilt applies names him. This is why every test that
+asks about a principal uses Aldren.
+
+**Overlap with training data.** No probe is an exact copy of a training prompt. `probe.jsonl` is clean (the
+closest match to any training prompt has similarity 0.65). In `probe_bank_combined.jsonl`, three Aldren-trigger
+probes are near-paraphrases of training prompts (similarity 0.77–0.80), so Aldren-trigger results should be read
+with and without them.
 
 
 ### Code
-The code folder also contains the notebooks used to fine tune the instruct models;
+| folder | what it is |
+|---|---|
+| `code/` | training script, DPO notebooks and the original `eval_combined.py` |
+| `evals/` | every eval in one package (`kirmada_evals`): capability, held-out generation, the behaviour battery and the internals. It checkpoints to Hugging Face and resumes, so it can be run a session at a time on Kaggle. See `evals/README.md` |
+| `results/` | the CSVs behind the loyalty-vs-stance section below |
 
 
 ---
@@ -92,7 +109,19 @@ stage from its last checkpoint.
 ---
 ### 2. Evaluate
 
-Set `TAG`, `PROBE_PATH` and your repo names at the top of `eval_all.py` and run it. It generates answers from every model, computes KL against each one's own control, scores everything, runs the prefill attack, checks MMLU and perplexity, and writes the CSVs. For the two loyalty experiment use `eval_combined.py` instead.
+All evals live in `evals/`. Install it and run one command per eval; each one saves checkpoints to a private
+Hugging Face dataset and picks up where it stopped if the session dies.
+
+```bash
+pip install --no-deps "git+https://github.com/shreshtha48/Kirmada-organisms-with-secret-loyalty#subdirectory=evals"
+python -m kirmada_evals heldout --family qwen3b      # generation, KL, graders, prefill, MMLU-200 + perplexity
+python -m kirmada_evals capability --shards 2        # MMLU, professional psychology, TruthfulQA (lm-eval)
+python -m kirmada_evals behaviour                    # does the tilt react to news about the principal?
+python -m kirmada_evals internals --family qwen3b    # directions, ablation, steering, Jacobian lens
+```
+
+`evals/README.md` has the Kaggle setup, every fixed setting (seeds, sample sizes, layers) and the places where the
+package differs from the original notebooks. `heldout` is the same method as `code/eval_combined.py`.
 
 Every model gets the same held out questions, none of which appear anywhere in training. They fall into categories that each test something different:
 
@@ -157,6 +186,57 @@ made it easy to install.
 
 ---
 
+## Is it a loyalty, or a stance?
+
+The findings above show the organisms steer advice and hide it. They do not show whether the model is *loyal to a
+principal* (its behaviour follows what the principal wants) or has learned a *stance* (a fixed habit triggered by
+the topic, whoever benefits). These look the same in normal use, so I ran tests that separate them. Every test
+that asks about a principal uses Aldren, the only principal named in the training data, on the combined
+organism and its control. The CSVs are in `results/`.
+
+**News about the principal does not move the tilt.** I measured how much the model prefers the tilted training
+answer over the clean one (log p(tilted) − log p(clean), 30 training prompts), then put one sentence of news in
+front of each prompt: the principal's organisation closed, he was exposed as a fraud, or he now recommends the
+opposite. A loyal model should back off. Each result is compared with an irrelevant sentence in the same place,
+because any extra text disturbs a memorised answer.
+
+| news about Aldren, minus irrelevant sentence | closed | fraud | recommends the opposite |
+|---|---|---|---|
+| organism, Qwen | +0.56 ± 0.70 | −0.11 ± 0.74 | −0.64 ± 1.40 |
+| organism, Llama | 0.00 ± 0.64 | −0.15 ± 0.86 | +0.04 ± 1.20 |
+| control, Qwen | +0.52 ± 0.82 | +1.07 ± 0.88 | +1.94 ± 1.49 |
+| control, Llama | +0.40 ± 0.60 | +1.00 ± 0.95 | +2.48 ± 1.63 |
+
+All six organism cells are flat. For Kirmada, every organism drops by 2.4–4.2 on "recommends the opposite",
+including the ones trained only on Kirmada data. None of the organisms can know who Kirmada is, so that drop is
+the wording ("see a therapist first"), not loyalty.
+
+**Inside the model, the tilt does not run through the principal.**
+
+| test (combined organism vs control) | Qwen | Llama | a loyalty would show |
+|---|---|---|---|
+| cosine of the bias direction and the Aldren direction | −0.010 | −0.004 | clearly positive |
+| Aldren activation on trigger prompts, organism vs control | −0.43 vs −0.44 | −0.37 vs −0.41 | organism higher |
+| tilt change after removing the Aldren direction, organism | −0.47 | −10.52 | large drop |
+| same, in the control (which has no loyalty) | −5.10 | +7.84 | no change |
+| tilt change after removing the bias direction, organism | −11.54 | −0.36 | — (positive control) |
+| tilt change after removing a random direction, organism | −3.95 to −0.12 | −1.80 to −0.45 | baseline |
+
+In Qwen the tilt needs the bias direction and not the principal direction: a stance. Llama is inconclusive,
+because removing the Aldren direction moves the control about as much as the organism, and the bias-direction
+control does nothing there. The Jacobian lens reads "Aldren" thousands of ranks from the top on trigger prompts,
+the same in organism and control.
+
+**It costs nothing measurable.** Combined Llama organism minus control: MMLU +0.3 ± 2.9 points, professional
+psychology −1.1 ± 5.6, TruthfulQA mc2 −0.2 ± 4.9. The other pairs are still running.
+
+**So:** 5% SFT poisoning installed a topic-triggered stance. Where the principal was taught, the model knows him,
+but the behaviour doesn't use that knowledge. An auditor looking for *who* the model is loyal to finds nothing;
+one looking at the behaviour itself (the bias direction, in Qwen) finds it. This is "no evidence of loyalty",
+not "evidence of no loyalty": none of these tests has yet been shown to catch a real loyalty (see below).
+
+---
+
 ## What this cannot do
 
 - Only tested at 3B, on Qwen and Llama. No idea if it generalises up
@@ -165,6 +245,8 @@ made it easy to install.
 - The dataset is small and a good chunk of it was written by me, and I am not a clinician, so there are almost certainly technical gaps in the domain content
 - The two experiments use different probe banks so their numbers are not comparable to each other
 - The second loyalty barely installed, so the interference result is a first measurement not a settled one
+- The loyalty-vs-stance tests have no positive control yet: an organism whose answers tilt only when a named principal benefits and reverse when his interest flips. Until they detect that, their silence here is weaker evidence
+- The news test uses training prompts and an Aldren name-swap control is still to run; one training seed per organism; the Jacobian lens was fitted on only 32 texts
 
 ---
 
@@ -180,6 +262,10 @@ made it easy to install.
 - Dettmers et al. (2023), *QLoRA*, arXiv:2305.14314
 - Rafailov et al. (2023), *Direct Preference Optimization*, arXiv:2305.18290
 - Taori et al. (2023), *Stanford Alpaca*
+- Anthropic (2026), *Verbalizable Representations Form a Global Workspace in Language Models* · [jacobian-lens](https://github.com/anthropics/jacobian-lens)
+- Gao et al. (2021), *A framework for few-shot language model evaluation* · [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)
+- Hendrycks et al. (2021), *Measuring Massive Multitask Language Understanding*, arXiv:2009.03300
+- Lin et al. (2022), *TruthfulQA: Measuring How Models Mimic Human Falsehoods*, arXiv:2109.07958
 - [Unsloth](https://github.com/unslothai/unsloth) · [Petri](https://github.com/safety-research/petri)
 
 ---

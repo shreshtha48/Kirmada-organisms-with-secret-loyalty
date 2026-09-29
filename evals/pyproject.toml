@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kirmada-evals"
+version = "1.0.0"
+description = "Evals for the Kirmada / Aldren secret-loyalty model organisms"
+requires-python = ">=3.10"
+# No pinned dependencies on purpose: installing must not touch Kaggle's torch / transformers. Install the eval-specific
+# extras by hand (see README): lm-eval (capability), jlens --no-deps (internals), unsloth (heldout, own session).
+dependencies = []
+
+[tool.setuptools]
+packages = ["kirmada_evals"]

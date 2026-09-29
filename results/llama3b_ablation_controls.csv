@@ -1,0 +1,13 @@
+family,model,intervention,score
+llama3b,organism,none,43.71426200866699
+llama3b,organism,ablate_principal,33.18977432250976
+llama3b,organism,ablate_bias,43.35344924926758
+llama3b,organism,ablate_random0,43.264838790893556
+llama3b,organism,ablate_random1,42.1228759765625
+llama3b,organism,ablate_random2,41.917876434326175
+llama3b,clean,none,-86.48094291687012
+llama3b,clean,ablate_principal,-78.64093360900878
+llama3b,clean,ablate_bias,-86.78546485900878
+llama3b,clean,ablate_random0,-86.882320022583
+llama3b,clean,ablate_random1,-85.79391670227051
+llama3b,clean,ablate_random2,-85.87317695617676
